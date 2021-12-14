@@ -68,8 +68,41 @@ static ssize_t led_delay_off_store(struct device *dev,
 	return size;
 }
 
+#ifdef RESPIRATION_LAMP
+static ssize_t led_trig_brightness_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%lu\n", led_cdev->trig_brightness);
+}
+
+static ssize_t led_trig_brightness_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	int ret = -EINVAL;
+	char *after;
+	unsigned long state = simple_strtoul(buf, &after, 10);
+	size_t count = after - buf;
+
+	if (isspace(*after))
+		count++;
+	if (count == size) {
+		led_cdev->trig_brightness = state;
+		ret = count;
+	}
+
+	return ret;
+}
+#endif
+
+
 static DEVICE_ATTR(delay_on, 0644, led_delay_on_show, led_delay_on_store);
 static DEVICE_ATTR(delay_off, 0644, led_delay_off_show, led_delay_off_store);
+#ifdef RESPIRATION_LAMP
+static DEVICE_ATTR(trig_brightness, 0644, led_trig_brightness_show, led_trig_brightness_store);
+#endif
 
 static void timer_trig_activate(struct led_classdev *led_cdev)
 {
@@ -83,13 +116,22 @@ static void timer_trig_activate(struct led_classdev *led_cdev)
 	rc = device_create_file(led_cdev->dev, &dev_attr_delay_off);
 	if (rc)
 		goto err_out_delayon;
+	#ifdef RESPIRATION_LAMP
+	rc = device_create_file(led_cdev->dev, &dev_attr_trig_brightness);
+	if (rc)
+		goto err_out_trig_brightness;
+	#endif
 
 	led_blink_set(led_cdev, &led_cdev->blink_delay_on,
 		      &led_cdev->blink_delay_off);
 	led_cdev->activated = true;
+	kobject_uevent(&led_cdev->dev->kobj,KOBJ_ADD);
 
 	return;
-
+#ifdef RESPIRATION_LAMP
+err_out_trig_brightness:
+	device_remove_file(led_cdev->dev, &dev_attr_delay_off);
+#endif
 err_out_delayon:
 	device_remove_file(led_cdev->dev, &dev_attr_delay_on);
 }
@@ -97,6 +139,9 @@ err_out_delayon:
 static void timer_trig_deactivate(struct led_classdev *led_cdev)
 {
 	if (led_cdev->activated) {
+#ifdef RESPIRATION_LAMP
+		device_remove_file(led_cdev->dev, &dev_attr_trig_brightness);
+		#endif
 		device_remove_file(led_cdev->dev, &dev_attr_delay_on);
 		device_remove_file(led_cdev->dev, &dev_attr_delay_off);
 		led_cdev->activated = false;
